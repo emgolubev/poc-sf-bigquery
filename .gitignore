@@ -8,3 +8,6 @@
 /var/
 /vendor/
 ###< symfony/framework-bundle ###
+/gcp/keyfile.json
+/.idea/
+composer.lock
