@@ -5,9 +5,15 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Service\BigQueryService;
+use Google\Cloud\BigQuery\BigQueryClient;
+use Google\Cloud\BigQuery\Dataset;
+use Google\Cloud\BigQuery\Table;
+use Google\Cloud\Core\ExponentialBackoff;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 class BigQueryTestCommand extends Command
 {
@@ -16,32 +22,104 @@ class BigQueryTestCommand extends Command
     /** @var BigQueryService */
     private $bigQueryService;
 
-    public function __construct(BigQueryService $bigQueryService, string $name = null)
+    /** @var ParameterBagInterface */
+    private $params;
+
+    /** @var string */
+    private $projectId;
+
+    public function __construct(BigQueryService $bigQueryService, ParameterBagInterface $params, string $name = null)
     {
         parent::__construct($name);
 
         $this->bigQueryService = $bigQueryService;
+        $this->params = $params;
+        $this->projectId = getenv('GOOGLE_PROJECT_ID');
     }
 
     protected function configure()
     {
-        // ...
+        $this->addArgument('datasetId', InputArgument::REQUIRED, 'What dataset ID?')
+        ;
     }
 
     protected function execute(InputInterface $input, OutputInterface $output)
     {
+        $datasetId = $input->getArgument('datasetId');
+
         $output->writeln([
             'Big Query Testing',
             '============',
             '',
         ]);
 
-        $datasetId = 'datasetExample2';
-        $table1Id = 'users';
-        $table2Id = 'images';
-
         $client = $this->bigQueryService->getClient();
 
+//        /** @var Dataset $d */
+//        foreach($client->datasets() as $d) {
+//            $d->delete(['deleteContents' => true]);
+//        }
+
+        $dataset = $this->createDataset($output, $client, $datasetId);
+
+        /** @var Table $table */
+        foreach ($dataset->tables() as $table) {
+            $output->writeln([
+                'Table found',
+                $table->identity()['tableId'],
+                '============',
+                '',
+            ]);
+        }
+
+        // QUERY
+        $jobConfig = $client->query(sprintf('SELECT * FROM `%s.%s.images`', $this->projectId, $datasetId));
+        $job = $client->startQuery($jobConfig);
+
+        $backOff = new ExponentialBackoff(10);
+
+        $backOff->execute(function () use ($job, $output) {
+            $output->writeln(['Waiting for job to complete', '']);
+            $job->reload();
+            if (!$job->isComplete()) {
+                $output->writeln('Job has not yet completed', 500);
+            }
+        });
+
+        $queryResults = $job->queryResults();
+
+        $rootPath = $this->params->get('kernel.project_dir');
+
+        $fp = fopen(sprintf('%s/var/results.csv', $rootPath), 'w');
+
+        foreach ($queryResults as $row) {
+            fputcsv($fp, $row);
+//            foreach ($row as $column => $value) {
+//                $output->writeln(sprintf('%s: %s', $column, json_encode($value)));
+//            }
+        }
+
+        $output->writeln('Results have been saved in /var/results.csv');
+
+        fclose($fp);
+
+        // CLEAN
+//        $dataset->delete(['deleteContents' => true]);
+//
+//        $output->writeln('Tables and dataset have been deleted');
+
+        return 0;
+    }
+
+    private function createDataset(OutputInterface $output, BigQueryClient $client, string $datasetId): Dataset
+    {
+        $dataset = $client->dataset($datasetId);
+
+        if ($dataset->exists()) {
+            return $dataset;
+        }
+
+        // CREATE DATASET AND TABLES
         $dataset =  $client->createDataset($datasetId);
         $fields1 = [
             [
@@ -73,8 +151,8 @@ class BigQueryTestCommand extends Command
             ],
         ];
 
-        $usersTable = $dataset->createTable($table1Id, ['schema' => ['fields' => $fields1]]);
-        $imagesTable = $dataset->createTable($table2Id, ['schema' => ['fields' => $fields2]]);
+        $usersTable = $dataset->createTable('users', ['schema' => ['fields' => $fields1]]);
+        $imagesTable = $dataset->createTable('images', ['schema' => ['fields' => $fields2]]);
 
         if ($usersTable->insertRows([
             [
@@ -126,13 +204,16 @@ class BigQueryTestCommand extends Command
             $output->writeln('Images have been inserted');
         }
 
-        // clean
-        $usersTable->delete();
-        $imagesTable->delete();
-        $dataset->delete();
+        // CREATE VIEW
+        $prefix = sprintf('%s.%s', $this->projectId, $datasetId);
+        $query = sprintf('SELECT i.user_id, i.image_id, i.image_src, u.name FROM `%s.images` AS i INNER JOIN `%s.users` AS u ON i.user_id = u.user_id', $prefix, $prefix);
 
-        $output->writeln('Tables and dataset have been deleted');
+        $view = $dataset->createTable('images_users', ['view' => ['query' => $query, 'useLegacySql' => false]]);
 
-        return 0;
+        if ($view->exists()) {
+            $output->writeln('View has been created');
+        }
+
+        return $dataset;
     }
 }
