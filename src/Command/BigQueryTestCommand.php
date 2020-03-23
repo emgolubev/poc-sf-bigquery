@@ -53,13 +53,10 @@ class BigQueryTestCommand extends Command
             '',
         ]);
 
+        // get BigQuery client
         $client = $this->bigQueryService->getClient();
 
-//        /** @var Dataset $d */
-//        foreach($client->datasets() as $d) {
-//            $d->delete(['deleteContents' => true]);
-//        }
-
+        // get dataset OR create it and tables and insert dummy data
         $dataset = $this->createDataset($output, $client, $datasetId);
 
         /** @var Table $table */
@@ -94,19 +91,11 @@ class BigQueryTestCommand extends Command
 
         foreach ($queryResults as $row) {
             fputcsv($fp, $row);
-//            foreach ($row as $column => $value) {
-//                $output->writeln(sprintf('%s: %s', $column, json_encode($value)));
-//            }
         }
 
         $output->writeln('Results have been saved in /var/results.csv');
 
         fclose($fp);
-
-        // CLEAN
-//        $dataset->delete(['deleteContents' => true]);
-//
-//        $output->writeln('Tables and dataset have been deleted');
 
         return 0;
     }
