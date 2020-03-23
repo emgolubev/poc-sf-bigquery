@@ -16,6 +16,12 @@ $ composer install
 ...
 ```
 
+It also provides Docker support, you can up the containers with `docker-compose` command.
+
+```console
+$ docker-compose up -d
+```
+
 ## Usage
 
 This prototype provides a CLI command `bigquery:test <datasetId>` which:
