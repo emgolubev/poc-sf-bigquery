@@ -39,8 +39,7 @@ class BigQueryTestCommand extends Command
 
     protected function configure()
     {
-        $this->addArgument('datasetId', InputArgument::REQUIRED, 'What dataset ID?')
-        ;
+        $this->addArgument('datasetId', InputArgument::REQUIRED, 'What dataset ID?');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output)
